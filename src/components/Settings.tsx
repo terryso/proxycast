@@ -76,6 +76,7 @@ export function Settings() {
       setLastCheckTime(new Date());
     } catch (e) {
       setMessage(`API 检测失败: ${e}`);
+      setTimeout(() => setMessage(null), 5000);
     }
     setChecking(false);
   };
@@ -107,7 +108,33 @@ export function Settings() {
   };
 
   if (!config) {
-    return <div>加载中...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">
+          <svg
+            className="animate-spin h-8 w-8 mx-auto mb-2"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            ></circle>
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+          <span>加载配置中...</span>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -242,7 +269,31 @@ export function Settings() {
             ) : (
               <Shield className="h-4 w-4" />
             )}
-            检测 Kiro (Claude Code)
+            检测 Kiro
+          </button>
+          <button
+            onClick={() => handleCheckApiCompatibility("gemini")}
+            disabled={checking}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {checking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Shield className="h-4 w-4" />
+            )}
+            检测 Gemini
+          </button>
+          <button
+            onClick={() => handleCheckApiCompatibility("qwen")}
+            disabled={checking}
+            className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {checking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Shield className="h-4 w-4" />
+            )}
+            检测 Qwen
           </button>
         </div>
 

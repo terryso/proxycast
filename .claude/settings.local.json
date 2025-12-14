@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run format:*)",
+      "Bash(npm run lint)",
+      "Bash(npx tsc:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(npm run check:*)",
+      "Bash(npm run:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

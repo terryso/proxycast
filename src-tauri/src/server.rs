@@ -582,12 +582,15 @@ async fn anthropic_messages(
                 .add("info", &format!("[RESP] Upstream status: {status}"));
 
             if status.is_success() {
-                match resp.text().await {
-                    Ok(body) => {
+                match resp.bytes().await {
+                    Ok(bytes) => {
+                        // 使用 lossy 转换，避免无效 UTF-8 导致崩溃
+                        let body = String::from_utf8_lossy(&bytes).to_string();
+
                         // 记录原始响应长度
                         state.logs.write().await.add(
                             "debug",
-                            &format!("[RESP] Raw body length: {} bytes", body.len()),
+                            &format!("[RESP] Raw body length: {} bytes", bytes.len()),
                         );
 
                         // 保存原始响应到文件用于调试
@@ -598,14 +601,14 @@ async fn anthropic_messages(
                             &format!("[RESP] Raw response saved to raw_response_{request_id}.txt"),
                         );
 
-                        // 记录响应的前500字符用于调试
-                        state.logs.write().await.add(
-                            "debug",
-                            &format!(
-                                "[RESP] Body preview: {}",
-                                &body.chars().take(500).collect::<String>()
-                            ),
-                        );
+                        // 记录响应的前200字符用于调试（减少日志量）
+                        let preview: String =
+                            body.chars().filter(|c| !c.is_control()).take(200).collect();
+                        state
+                            .logs
+                            .write()
+                            .await
+                            .add("debug", &format!("[RESP] Body preview: {preview}"));
 
                         let parsed = parse_cw_response(&body);
 
@@ -679,8 +682,9 @@ async fn anthropic_messages(
                                     &format!("[RETRY] Response status: {retry_status}"),
                                 );
                                 if retry_resp.status().is_success() {
-                                    match retry_resp.text().await {
-                                        Ok(body) => {
+                                    match retry_resp.bytes().await {
+                                        Ok(bytes) => {
+                                            let body = String::from_utf8_lossy(&bytes).to_string();
                                             let parsed = parse_cw_response(&body);
                                             state.logs.write().await.add(
                                                 "info",
@@ -713,7 +717,11 @@ async fn anthropic_messages(
                                         }
                                     }
                                 }
-                                let body = retry_resp.text().await.unwrap_or_default();
+                                let body = retry_resp
+                                    .bytes()
+                                    .await
+                                    .map(|b| String::from_utf8_lossy(&b).to_string())
+                                    .unwrap_or_default();
                                 state.logs.write().await.add(
                                     "error",
                                     &format!(
@@ -918,9 +926,6 @@ fn build_anthropic_stream_response(model: &str, parsed: &CWParsedResponse) -> Re
 
     // 3. Tool use 块
     for tc in &tool_calls {
-        let input: serde_json::Value =
-            serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({}));
-
         // content_block_start
         let block_start = serde_json::json!({
             "type": "content_block_start",
@@ -937,12 +942,18 @@ fn build_anthropic_stream_response(model: &str, parsed: &CWParsedResponse) -> Re
         ));
 
         // content_block_delta - input_json_delta
+        // 注意：partial_json 应该是原始 JSON 字符串，不是再次序列化的
+        let partial_json = if tc.function.arguments.is_empty() {
+            "{}".to_string()
+        } else {
+            tc.function.arguments.clone()
+        };
         let block_delta = serde_json::json!({
             "type": "content_block_delta",
             "index": block_index,
             "delta": {
                 "type": "input_json_delta",
-                "partial_json": serde_json::to_string(&input).unwrap_or_default()
+                "partial_json": partial_json
             }
         });
         events.push(format!(

@@ -76,8 +76,8 @@ export function Dashboard() {
     loadKiroStatus();
     initTokenHash();
 
-    const statusInterval = setInterval(fetchStatus, 2000);
-    const tokenInterval = setInterval(checkTokenFileChanges, 5000);
+    const statusInterval = setInterval(fetchStatus, 3000);
+    const tokenInterval = setInterval(checkTokenFileChanges, 10000);
 
     return () => {
       clearInterval(statusInterval);

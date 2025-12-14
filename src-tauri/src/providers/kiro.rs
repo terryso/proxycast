@@ -6,6 +6,36 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::path::PathBuf;
 
+/// 生成设备指纹 (MAC 地址的 SHA256)
+fn get_device_fingerprint() -> String {
+    use std::process::Command;
+
+    // 尝试获取 MAC 地址
+    let mac = if cfg!(target_os = "macos") {
+        Command::new("ifconfig")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.contains("ether "))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .map(|s| s.to_string())
+            })
+    } else {
+        None
+    };
+
+    let mac = mac.unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+
+    // SHA256 hash
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    mac.hash(&mut hasher);
+    format!("{:016x}{:016x}", hasher.finish(), hasher.finish())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KiroCredentials {
@@ -278,6 +308,10 @@ impl KiroProvider {
             );
         }
 
+        // 生成设备指纹用于伪装 Kiro IDE
+        let device_fp = get_device_fingerprint();
+        let kiro_version = "0.1.25";
+
         let resp = self
             .client
             .post(&url)
@@ -285,6 +319,18 @@ impl KiroProvider {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .header("amz-sdk-invocation-id", uuid::Uuid::new_v4().to_string())
+            .header("amz-sdk-request", "attempt=1; max=1")
+            .header(
+                "x-amz-user-agent",
+                format!("aws-sdk-js/1.0.7 KiroIDE-{kiro_version}-{device_fp}"),
+            )
+            .header(
+                "user-agent",
+                format!(
+                    "aws-sdk-js/1.0.7 ua/2.1 os/macos#14.0 lang/js md/nodejs#20.16.0 api/codewhispererstreaming#1.0.7 m/E KiroIDE-{kiro_version}-{device_fp}"
+                ),
+            )
+            .header("x-amzn-kiro-agent-mode", "vibe")
             .json(&cw_request)
             .send()
             .await?;

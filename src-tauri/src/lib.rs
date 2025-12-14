@@ -5,8 +5,112 @@ mod models;
 mod providers;
 mod server;
 
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderType {
+    Kiro,
+    Gemini,
+    Qwen,
+    #[serde(rename = "openai")]
+    OpenAI,
+    Claude,
+}
+
+impl std::fmt::Display for ProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProviderType::Kiro => write!(f, "kiro"),
+            ProviderType::Gemini => write!(f, "gemini"),
+            ProviderType::Qwen => write!(f, "qwen"),
+            ProviderType::OpenAI => write!(f, "openai"),
+            ProviderType::Claude => write!(f, "claude"),
+        }
+    }
+}
+
+impl std::str::FromStr for ProviderType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "kiro" => Ok(ProviderType::Kiro),
+            "gemini" => Ok(ProviderType::Gemini),
+            "qwen" => Ok(ProviderType::Qwen),
+            "openai" => Ok(ProviderType::OpenAI),
+            "claude" => Ok(ProviderType::Claude),
+            _ => Err(format!("Invalid provider: {s}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_type_from_str() {
+        assert_eq!("kiro".parse::<ProviderType>().unwrap(), ProviderType::Kiro);
+        assert_eq!(
+            "gemini".parse::<ProviderType>().unwrap(),
+            ProviderType::Gemini
+        );
+        assert_eq!("qwen".parse::<ProviderType>().unwrap(), ProviderType::Qwen);
+        assert_eq!(
+            "openai".parse::<ProviderType>().unwrap(),
+            ProviderType::OpenAI
+        );
+        assert_eq!(
+            "claude".parse::<ProviderType>().unwrap(),
+            ProviderType::Claude
+        );
+
+        // 测试大小写不敏感
+        assert_eq!("KIRO".parse::<ProviderType>().unwrap(), ProviderType::Kiro);
+        assert_eq!(
+            "Gemini".parse::<ProviderType>().unwrap(),
+            ProviderType::Gemini
+        );
+
+        // 测试无效的 provider
+        assert!("invalid".parse::<ProviderType>().is_err());
+    }
+
+    #[test]
+    fn test_provider_type_display() {
+        assert_eq!(ProviderType::Kiro.to_string(), "kiro");
+        assert_eq!(ProviderType::Gemini.to_string(), "gemini");
+        assert_eq!(ProviderType::Qwen.to_string(), "qwen");
+        assert_eq!(ProviderType::OpenAI.to_string(), "openai");
+        assert_eq!(ProviderType::Claude.to_string(), "claude");
+    }
+
+    #[test]
+    fn test_provider_type_serde() {
+        // 测试序列化
+        assert_eq!(
+            serde_json::to_string(&ProviderType::Kiro).unwrap(),
+            "\"kiro\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderType::OpenAI).unwrap(),
+            "\"openai\""
+        );
+
+        // 测试反序列化
+        assert_eq!(
+            serde_json::from_str::<ProviderType>("\"kiro\"").unwrap(),
+            ProviderType::Kiro
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderType>("\"openai\"").unwrap(),
+            ProviderType::OpenAI
+        );
+    }
+}
 
 pub type AppState = Arc<RwLock<server::ServerState>>;
 pub type LogState = Arc<RwLock<logger::LogStore>>;
@@ -78,17 +182,15 @@ async fn set_default_provider(
     logs: tauri::State<'_, LogState>,
     provider: String,
 ) -> Result<String, String> {
-    let valid_providers = ["kiro", "gemini", "qwen", "openai", "claude"];
-    if !valid_providers.contains(&provider.as_str()) {
-        return Err(format!("Invalid provider: {provider}"));
-    }
+    // 使用枚举验证 provider
+    let provider_type: ProviderType = provider.parse().map_err(|e: String| e)?;
 
     let mut s = state.write().await;
     s.config.default_provider = provider.clone();
     config::save_config(&s.config).map_err(|e| e.to_string())?;
     logs.write()
         .await
-        .add("info", &format!("默认 Provider 已切换为: {provider}"));
+        .add("info", &format!("默认 Provider 已切换为: {provider_type}"));
     Ok(provider)
 }
 
@@ -796,9 +898,12 @@ async fn check_api_compatibility(
     logs: tauri::State<'_, LogState>,
     provider: String,
 ) -> Result<ApiCompatibilityResult, String> {
+    // 使用枚举验证 provider
+    let provider_type: ProviderType = provider.parse().map_err(|e: String| e)?;
+
     logs.write().await.add(
         "info",
-        &format!("[API检测] 开始检测 {provider} API 兼容性 (Claude Code 功能测试)..."),
+        &format!("[API检测] 开始检测 {provider_type} API 兼容性 (Claude Code 功能测试)..."),
     );
 
     let s = state.read().await;
@@ -806,17 +911,20 @@ async fn check_api_compatibility(
     let mut warnings: Vec<String> = Vec::new();
 
     // Claude Code 需要的测试项目
-    let test_cases: Vec<(&str, &str)> = match provider.as_str() {
-        "kiro" => vec![
+    let test_cases: Vec<(&str, &str)> = match provider_type {
+        ProviderType::Kiro => vec![
             ("claude-sonnet-4-5", "basic"),     // 基础对话
             ("claude-sonnet-4-5", "tool_call"), // Tool Calls 支持
         ],
-        "gemini" => vec![("gemini-2.5-flash", "basic"), ("gemini-2.5-pro", "basic")],
-        "qwen" => vec![
-            ("qwen3-coder-plus", "basic"),
-            ("qwen3-coder-flash", "basic"),
+        ProviderType::Gemini => vec![
+            ("gemini-2.5-flash", "basic"),
+            ("gemini-2.5-flash", "tool_call"),
         ],
-        _ => vec![],
+        ProviderType::Qwen => vec![
+            ("qwen3-coder-plus", "basic"),
+            ("qwen3-coder-plus", "tool_call"),
+        ],
+        ProviderType::OpenAI | ProviderType::Claude => vec![],
     };
 
     for (model, test_type) in test_cases {
@@ -881,8 +989,16 @@ async fn check_api_compatibility(
             }
         };
 
-        let result = match provider.as_str() {
-            "kiro" => s.kiro_provider.call_api(&test_request).await,
+        let result = match provider_type {
+            ProviderType::Kiro => s.kiro_provider.call_api(&test_request).await,
+            ProviderType::Gemini => {
+                // Gemini 暂时不支持直接 API 检测，返回未实现错误
+                Err("Gemini API compatibility check not yet implemented".into())
+            }
+            ProviderType::Qwen => {
+                // Qwen 暂时不支持直接 API 检测，返回未实现错误
+                Err("Qwen API compatibility check not yet implemented".into())
+            }
             _ => Err("Provider not supported for direct API check".into()),
         };
 

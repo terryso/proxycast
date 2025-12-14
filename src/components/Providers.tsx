@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   Check,
   X,
@@ -47,6 +47,8 @@ import {
   getDefaultProvider,
   setDefaultProvider,
 } from "@/hooks/useTauri";
+import { useProviderState } from "@/hooks/useProviderState";
+import { useFileMonitoring } from "@/hooks/useFileMonitoring";
 
 interface Provider {
   id: string;
@@ -98,31 +100,33 @@ export function Providers() {
   const [providers, setProviders] = useState<Provider[]>(defaultProviders);
   const [activeProvider, setActiveProvider] = useState<string>("kiro");
 
-  // Kiro state
-  const [kiroStatus, setKiroStatus] = useState<KiroCredentialStatus | null>(
-    null,
-  );
-  const [kiroEnvVars, setKiroEnvVars] = useState<EnvVariable[]>([]);
-  const kiroHashRef = useRef<string>("");
-  const [kiroLastSync, setKiroLastSync] = useState<Date | null>(null);
+  // 使用 useProviderState hook 管理三个 OAuth providers
+  const kiro = useProviderState<KiroCredentialStatus>("kiro", {
+    getCredentials: getKiroCredentials,
+    getEnvVars: getEnvVariables,
+    getHash: getTokenFileHash,
+    checkAndReload: checkAndReloadCredentials,
+    reloadCredentials: reloadCredentials,
+    refreshToken: refreshKiroToken,
+  });
 
-  // Gemini state
-  const [geminiStatus, setGeminiStatus] =
-    useState<GeminiCredentialStatus | null>(null);
-  const [geminiEnvVars, setGeminiEnvVars] = useState<EnvVariable[]>([]);
-  const geminiHashRef = useRef<string>("");
-  const [geminiLastSync, setGeminiLastSync] = useState<Date | null>(null);
+  const gemini = useProviderState<GeminiCredentialStatus>("gemini", {
+    getCredentials: getGeminiCredentials,
+    getEnvVars: getGeminiEnvVariables,
+    getHash: getGeminiTokenFileHash,
+    checkAndReload: checkAndReloadGeminiCredentials,
+    reloadCredentials: reloadGeminiCredentials,
+    refreshToken: refreshGeminiToken,
+  });
 
-  // Qwen state
-  const [qwenStatus, setQwenStatus] = useState<QwenCredentialStatus | null>(
-    null,
-  );
-  const [qwenEnvVars, setQwenEnvVars] = useState<EnvVariable[]>([]);
-  const qwenHashRef = useRef<string>("");
-  const [qwenLastSync, setQwenLastSync] = useState<Date | null>(null);
-
-  // Last check time (used for display)
-  const [lastCheckTime, setLastCheckTime] = useState<Date | null>(null);
+  const qwen = useProviderState<QwenCredentialStatus>("qwen", {
+    getCredentials: getQwenCredentials,
+    getEnvVars: getQwenEnvVariables,
+    getHash: getQwenTokenFileHash,
+    checkAndReload: checkAndReloadQwenCredentials,
+    reloadCredentials: reloadQwenCredentials,
+    refreshToken: refreshQwenToken,
+  });
 
   // OpenAI Custom state
   const [openaiStatus, setOpenaiStatus] = useState<OpenAICustomStatus | null>(
@@ -151,6 +155,13 @@ export function Providers() {
   } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
+  // 使用 useFileMonitoring hook 自动监控文件变化
+  useFileMonitoring({
+    kiro: { checkFn: kiro.checkForChanges, interval: 5000 },
+    gemini: { checkFn: gemini.checkForChanges, interval: 5000 },
+    qwen: { checkFn: qwen.checkForChanges, interval: 5000 },
+  });
+
   useEffect(() => {
     const init = async () => {
       // Load default provider
@@ -161,157 +172,62 @@ export function Providers() {
         console.error("Failed to get default provider:", e);
       }
 
-      await loadKiroStatus();
-      await loadGeminiStatus();
-      await loadQwenStatus();
+      // 初始化加载所有 provider 状态
+      await kiro.load();
+      await gemini.load();
+      await qwen.load();
       await loadOpenAICustomStatus();
       await loadClaudeCustomStatus();
-
-      // Get initial hashes
-      try {
-        const kiroHash = await getTokenFileHash();
-        const geminiHash = await getGeminiTokenFileHash();
-        const qwenHash = await getQwenTokenFileHash();
-        kiroHashRef.current = kiroHash;
-        geminiHashRef.current = geminiHash;
-        qwenHashRef.current = qwenHash;
-        console.log("[Init] Kiro hash:", kiroHash);
-        console.log("[Init] Gemini hash:", geminiHash);
-        console.log("[Init] Qwen hash:", qwenHash);
-      } catch (e) {
-        console.error("Failed to get initial hash:", e);
-      }
     };
     init();
-
-    // Define checkFileChanges inside useEffect to avoid stale closure
-    const checkFiles = async () => {
-      const now = new Date();
-      setLastCheckTime(now);
-      console.log("[Check] Running file check at", now.toLocaleTimeString());
-
-      // Check Kiro
-      try {
-        console.log("[Check] Kiro current hash:", kiroHashRef.current);
-        const kiroResult = await checkAndReloadCredentials(kiroHashRef.current);
-        console.log("[Check] Kiro result:", kiroResult);
-
-        if (kiroResult.new_hash !== kiroHashRef.current) {
-          console.log(
-            "[Check] Kiro hash changed:",
-            kiroHashRef.current,
-            "->",
-            kiroResult.new_hash,
-          );
-        }
-        kiroHashRef.current = kiroResult.new_hash;
-
-        if (kiroResult.changed && kiroResult.reloaded) {
-          await loadKiroStatus();
-          setKiroLastSync(new Date());
-          setMessage({
-            type: "success",
-            text: "[Kiro] 检测到凭证文件变化，已自动重新加载",
-          });
-          setTimeout(() => setMessage(null), 5000);
-        }
-      } catch (e) {
-        console.error("Kiro check error:", e);
-      }
-
-      // Check Gemini
-      try {
-        const geminiResult = await checkAndReloadGeminiCredentials(
-          geminiHashRef.current,
-        );
-        geminiHashRef.current = geminiResult.new_hash;
-        if (geminiResult.changed && geminiResult.reloaded) {
-          await loadGeminiStatus();
-          setGeminiLastSync(new Date());
-          setMessage({
-            type: "success",
-            text: "[Gemini] 检测到凭证文件变化，已自动重新加载",
-          });
-          setTimeout(() => setMessage(null), 5000);
-        }
-      } catch (e) {
-        console.error("Gemini check error:", e);
-      }
-
-      // Check Qwen
-      try {
-        const qwenResult = await checkAndReloadQwenCredentials(
-          qwenHashRef.current,
-        );
-        qwenHashRef.current = qwenResult.new_hash;
-        if (qwenResult.changed && qwenResult.reloaded) {
-          await loadQwenStatus();
-          setQwenLastSync(new Date());
-          setMessage({
-            type: "success",
-            text: "[Qwen] 检测到凭证文件变化，已自动重新加载",
-          });
-          setTimeout(() => setMessage(null), 5000);
-        }
-      } catch (e) {
-        console.error("Qwen check error:", e);
-      }
-    };
-
-    const interval = setInterval(checkFiles, 5000);
-    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadKiroStatus = async () => {
-    try {
-      const status = await getKiroCredentials();
-      setKiroStatus(status);
-      setKiroEnvVars(await getEnvVariables());
+  // 更新 provider 列表状态
+  useEffect(() => {
+    if (kiro.status) {
       setProviders((prev) =>
         prev.map((p) =>
           p.id === "kiro"
-            ? { ...p, status: status.loaded ? "connected" : "disconnected" }
+            ? {
+                ...p,
+                status: kiro.status?.loaded ? "connected" : "disconnected",
+              }
             : p,
         ),
       );
-    } catch (e) {
-      console.error("Failed to load Kiro status:", e);
     }
-  };
+  }, [kiro.status]);
 
-  const loadGeminiStatus = async () => {
-    try {
-      const status = await getGeminiCredentials();
-      setGeminiStatus(status);
-      setGeminiEnvVars(await getGeminiEnvVariables());
+  useEffect(() => {
+    if (gemini.status) {
       setProviders((prev) =>
         prev.map((p) =>
           p.id === "gemini"
-            ? { ...p, status: status.loaded ? "connected" : "disconnected" }
+            ? {
+                ...p,
+                status: gemini.status?.loaded ? "connected" : "disconnected",
+              }
             : p,
         ),
       );
-    } catch (e) {
-      console.error("Failed to load Gemini status:", e);
     }
-  };
+  }, [gemini.status]);
 
-  const loadQwenStatus = async () => {
-    try {
-      const status = await getQwenCredentials();
-      setQwenStatus(status);
-      setQwenEnvVars(await getQwenEnvVariables());
+  useEffect(() => {
+    if (qwen.status) {
       setProviders((prev) =>
         prev.map((p) =>
           p.id === "qwen"
-            ? { ...p, status: status.loaded ? "connected" : "disconnected" }
+            ? {
+                ...p,
+                status: qwen.status?.loaded ? "connected" : "disconnected",
+              }
             : p,
         ),
       );
-    } catch (e) {
-      console.error("Failed to load Qwen status:", e);
     }
-  };
+  }, [qwen.status]);
 
   const loadOpenAICustomStatus = async () => {
     try {
@@ -362,51 +278,39 @@ export function Providers() {
   };
 
   const handleLoadCredentials = async (provider: string) => {
-    setLoading(`load-${provider}`);
     setMessage(null);
     try {
       if (provider === "kiro") {
-        await reloadCredentials();
-        await loadKiroStatus();
-        kiroHashRef.current = await getTokenFileHash();
-        setKiroLastSync(new Date());
+        await kiro.reload();
+        setMessage({ type: "success", text: "[Kiro] 凭证加载成功！" });
       } else if (provider === "gemini") {
-        await reloadGeminiCredentials();
-        await loadGeminiStatus();
-        geminiHashRef.current = await getGeminiTokenFileHash();
-        setGeminiLastSync(new Date());
+        await gemini.reload();
+        setMessage({ type: "success", text: "[Gemini] 凭证加载成功！" });
       } else if (provider === "qwen") {
-        await reloadQwenCredentials();
-        await loadQwenStatus();
-        qwenHashRef.current = await getQwenTokenFileHash();
-        setQwenLastSync(new Date());
+        await qwen.reload();
+        setMessage({ type: "success", text: "[Qwen] 凭证加载成功！" });
       }
-      setMessage({ type: "success", text: `[${provider}] 凭证加载成功！` });
     } catch (e: any) {
       setMessage({ type: "error", text: `加载失败: ${e.toString()}` });
     }
-    setLoading(null);
   };
 
   const handleRefreshToken = async (provider: string) => {
-    setLoading(`refresh-${provider}`);
     setMessage(null);
     try {
       if (provider === "kiro") {
-        await refreshKiroToken();
-        await loadKiroStatus();
+        await kiro.refresh();
+        setMessage({ type: "success", text: "[Kiro] Token 刷新成功！" });
       } else if (provider === "gemini") {
-        await refreshGeminiToken();
-        await loadGeminiStatus();
+        await gemini.refresh();
+        setMessage({ type: "success", text: "[Gemini] Token 刷新成功！" });
       } else if (provider === "qwen") {
-        await refreshQwenToken();
-        await loadQwenStatus();
+        await qwen.refresh();
+        setMessage({ type: "success", text: "[Qwen] Token 刷新成功！" });
       }
-      setMessage({ type: "success", text: `[${provider}] Token 刷新成功！` });
     } catch (e: any) {
       setMessage({ type: "error", text: `刷新失败: ${e.toString()}` });
     }
-    setLoading(null);
   };
 
   const handleSaveOpenAIConfig = async () => {
@@ -513,10 +417,14 @@ export function Providers() {
 
   const currentEnvVars =
     activeProvider === "kiro"
-      ? kiroEnvVars
+      ? kiro.envVars
       : activeProvider === "gemini"
-        ? geminiEnvVars
-        : qwenEnvVars;
+        ? gemini.envVars
+        : qwen.envVars;
+
+  const isAnyLoading = Boolean(
+    kiro.loading || gemini.loading || qwen.loading || loading,
+  );
 
   return (
     <div className="space-y-6">
@@ -576,13 +484,7 @@ export function Providers() {
               <span>
                 最后同步:{" "}
                 <span className="text-foreground">
-                  {formatTime(kiroLastSync)}
-                </span>
-              </span>
-              <span>
-                最后检测:{" "}
-                <span className="text-foreground">
-                  {formatTime(lastCheckTime)}
+                  {formatTime(kiro.lastSync)}
                 </span>
               </span>
               <span className="flex items-center gap-1">
@@ -595,47 +497,47 @@ export function Providers() {
             <div>
               <span className="text-muted-foreground">凭证路径:</span>
               <code className="ml-2 rounded bg-muted px-2 py-0.5 text-xs break-all">
-                {kiroStatus?.creds_path ||
+                {kiro.status?.creds_path ||
                   "~/.aws/sso/cache/kiro-auth-token.json"}
               </code>
             </div>
             <div>
               <span className="text-muted-foreground">区域:</span>
-              <span className="ml-2">{kiroStatus?.region || "未设置"}</span>
+              <span className="ml-2">{kiro.status?.region || "未设置"}</span>
             </div>
             <div>
               <span className="text-muted-foreground">Access Token:</span>
               <span
-                className={`ml-2 ${kiroStatus?.has_access_token ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${kiro.status?.has_access_token ? "text-green-600" : "text-red-500"}`}
               >
-                {kiroStatus?.has_access_token ? "✓ 已加载" : "✗ 未加载"}
+                {kiro.status?.has_access_token ? "✓ 已加载" : "✗ 未加载"}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Refresh Token:</span>
               <span
-                className={`ml-2 ${kiroStatus?.has_refresh_token ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${kiro.status?.has_refresh_token ? "text-green-600" : "text-red-500"}`}
               >
-                {kiroStatus?.has_refresh_token ? "✓ 已加载" : "✗ 未加载"}
+                {kiro.status?.has_refresh_token ? "✓ 已加载" : "✗ 未加载"}
               </span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => handleLoadCredentials("kiro")}
-              disabled={loading !== null}
+              disabled={isAnyLoading}
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               <FolderOpen className="h-4 w-4" />
-              {loading === "load-kiro" ? "加载中..." : "一键读取凭证"}
+              {kiro.loading === "reload" ? "加载中..." : "一键读取凭证"}
             </button>
             <button
               onClick={() => handleRefreshToken("kiro")}
-              disabled={loading !== null || !kiroStatus?.has_refresh_token}
+              disabled={isAnyLoading || !kiro.status?.has_refresh_token}
               className="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
             >
               <RefreshCw
-                className={`h-4 w-4 ${loading === "refresh-kiro" ? "animate-spin" : ""}`}
+                className={`h-4 w-4 ${kiro.loading === "refresh" ? "animate-spin" : ""}`}
               />
               刷新 Token
             </button>
@@ -659,13 +561,7 @@ export function Providers() {
               <span>
                 最后同步:{" "}
                 <span className="text-foreground">
-                  {formatTime(geminiLastSync)}
-                </span>
-              </span>
-              <span>
-                最后检测:{" "}
-                <span className="text-foreground">
-                  {formatTime(lastCheckTime)}
+                  {formatTime(gemini.lastSync)}
                 </span>
               </span>
               <span className="flex items-center gap-1">
@@ -678,50 +574,50 @@ export function Providers() {
             <div>
               <span className="text-muted-foreground">凭证路径:</span>
               <code className="ml-2 rounded bg-muted px-2 py-0.5 text-xs break-all">
-                {geminiStatus?.creds_path || "~/.gemini/oauth_creds.json"}
+                {gemini.status?.creds_path || "~/.gemini/oauth_creds.json"}
               </code>
             </div>
             <div>
               <span className="text-muted-foreground">Token 有效:</span>
               <span
-                className={`ml-2 ${geminiStatus?.is_valid ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${gemini.status?.is_valid ? "text-green-600" : "text-red-500"}`}
               >
-                {geminiStatus?.is_valid ? "✓ 有效" : "✗ 无效/过期"}
+                {gemini.status?.is_valid ? "✓ 有效" : "✗ 无效/过期"}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Access Token:</span>
               <span
-                className={`ml-2 ${geminiStatus?.has_access_token ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${gemini.status?.has_access_token ? "text-green-600" : "text-red-500"}`}
               >
-                {geminiStatus?.has_access_token ? "✓ 已加载" : "✗ 未加载"}
+                {gemini.status?.has_access_token ? "✓ 已加载" : "✗ 未加载"}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Refresh Token:</span>
               <span
-                className={`ml-2 ${geminiStatus?.has_refresh_token ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${gemini.status?.has_refresh_token ? "text-green-600" : "text-red-500"}`}
               >
-                {geminiStatus?.has_refresh_token ? "✓ 已加载" : "✗ 未加载"}
+                {gemini.status?.has_refresh_token ? "✓ 已加载" : "✗ 未加载"}
               </span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => handleLoadCredentials("gemini")}
-              disabled={loading !== null}
+              disabled={isAnyLoading}
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               <FolderOpen className="h-4 w-4" />
-              {loading === "load-gemini" ? "加载中..." : "一键读取凭证"}
+              {gemini.loading === "reload" ? "加载中..." : "一键读取凭证"}
             </button>
             <button
               onClick={() => handleRefreshToken("gemini")}
-              disabled={loading !== null || !geminiStatus?.has_refresh_token}
+              disabled={isAnyLoading || !gemini.status?.has_refresh_token}
               className="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
             >
               <RefreshCw
-                className={`h-4 w-4 ${loading === "refresh-gemini" ? "animate-spin" : ""}`}
+                className={`h-4 w-4 ${gemini.loading === "refresh" ? "animate-spin" : ""}`}
               />
               刷新 Token
             </button>
@@ -745,13 +641,7 @@ export function Providers() {
               <span>
                 最后同步:{" "}
                 <span className="text-foreground">
-                  {formatTime(qwenLastSync)}
-                </span>
-              </span>
-              <span>
-                最后检测:{" "}
-                <span className="text-foreground">
-                  {formatTime(lastCheckTime)}
+                  {formatTime(qwen.lastSync)}
                 </span>
               </span>
               <span className="flex items-center gap-1">
@@ -764,50 +654,50 @@ export function Providers() {
             <div>
               <span className="text-muted-foreground">凭证路径:</span>
               <code className="ml-2 rounded bg-muted px-2 py-0.5 text-xs break-all">
-                {qwenStatus?.creds_path || "~/.qwen/oauth_creds.json"}
+                {qwen.status?.creds_path || "~/.qwen/oauth_creds.json"}
               </code>
             </div>
             <div>
               <span className="text-muted-foreground">Token 有效:</span>
               <span
-                className={`ml-2 ${qwenStatus?.is_valid ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${qwen.status?.is_valid ? "text-green-600" : "text-red-500"}`}
               >
-                {qwenStatus?.is_valid ? "✓ 有效" : "✗ 无效/过期"}
+                {qwen.status?.is_valid ? "✓ 有效" : "✗ 无效/过期"}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Access Token:</span>
               <span
-                className={`ml-2 ${qwenStatus?.has_access_token ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${qwen.status?.has_access_token ? "text-green-600" : "text-red-500"}`}
               >
-                {qwenStatus?.has_access_token ? "✓ 已加载" : "✗ 未加载"}
+                {qwen.status?.has_access_token ? "✓ 已加载" : "✗ 未加载"}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Refresh Token:</span>
               <span
-                className={`ml-2 ${qwenStatus?.has_refresh_token ? "text-green-600" : "text-red-500"}`}
+                className={`ml-2 ${qwen.status?.has_refresh_token ? "text-green-600" : "text-red-500"}`}
               >
-                {qwenStatus?.has_refresh_token ? "✓ 已加载" : "✗ 未加载"}
+                {qwen.status?.has_refresh_token ? "✓ 已加载" : "✗ 未加载"}
               </span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => handleLoadCredentials("qwen")}
-              disabled={loading !== null}
+              disabled={isAnyLoading}
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               <FolderOpen className="h-4 w-4" />
-              {loading === "load-qwen" ? "加载中..." : "一键读取凭证"}
+              {qwen.loading === "reload" ? "加载中..." : "一键读取凭证"}
             </button>
             <button
               onClick={() => handleRefreshToken("qwen")}
-              disabled={loading !== null || !qwenStatus?.has_refresh_token}
+              disabled={isAnyLoading || !qwen.status?.has_refresh_token}
               className="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
             >
               <RefreshCw
-                className={`h-4 w-4 ${loading === "refresh-qwen" ? "animate-spin" : ""}`}
+                className={`h-4 w-4 ${qwen.loading === "refresh" ? "animate-spin" : ""}`}
               />
               刷新 Token
             </button>
@@ -1027,7 +917,7 @@ export function Providers() {
               {defaultProvider !== provider.id && (
                 <button
                   onClick={() => handleSetDefaultProvider(provider.id)}
-                  disabled={loading !== null}
+                  disabled={isAnyLoading}
                   className="rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
                   title="设为默认"
                 >
@@ -1041,12 +931,19 @@ export function Providers() {
                 provider.id === "qwen") && (
                 <button
                   onClick={() => handleRefreshToken(provider.id)}
-                  disabled={loading !== null}
+                  disabled={isAnyLoading}
                   className="rounded p-2 hover:bg-muted"
                   title="刷新 Token"
                 >
                   <RefreshCw
-                    className={`h-4 w-4 ${loading === `refresh-${provider.id}` ? "animate-spin" : ""}`}
+                    className={`h-4 w-4 ${
+                      (provider.id === "kiro" && kiro.loading === "refresh") ||
+                      (provider.id === "gemini" &&
+                        gemini.loading === "refresh") ||
+                      (provider.id === "qwen" && qwen.loading === "refresh")
+                        ? "animate-spin"
+                        : ""
+                    }`}
                   />
                 </button>
               )}
