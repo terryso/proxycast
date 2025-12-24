@@ -598,6 +598,134 @@ export async function getKiroCredentialFingerprint(
   return invoke("get_kiro_credential_fingerprint", { uuid });
 }
 
+// ============ Kiro 凭证池管理 HTTP API ============
+
+/** 可用凭证信息 */
+export interface AvailableCredential {
+  /** 凭证UUID */
+  uuid: string;
+  /** 凭证名称 */
+  name: string;
+  /** 是否可用 */
+  available: boolean;
+  /** Token过期时间 */
+  expires_at?: string;
+  /** 最后使用时间 */
+  last_used?: string;
+  /** 健康状态分数 (0-100) */
+  health_score: number;
+  /** 错误计数 */
+  error_count: number;
+  /** 最后错误信息 */
+  last_error?: string;
+}
+
+/** 获取可用凭证列表的响应 */
+export interface AvailableCredentialsResponse {
+  /** 可用凭证列表 */
+  credentials: AvailableCredential[];
+  /** 总凭证数 */
+  total: number;
+  /** 可用凭证数 */
+  available: number;
+  /** 系统状态 */
+  status: string;
+}
+
+/** 选择凭证请求参数 */
+export interface SelectCredentialRequest {
+  /** 指定模型（可选） */
+  model?: string;
+  /** 强制选择特定UUID（可选） */
+  force_uuid?: string;
+}
+
+/** 选择凭证响应 */
+export interface SelectCredentialResponse {
+  /** 选中��凭证UUID */
+  uuid: string;
+  /** 凭证名称 */
+  name: string;
+  /** Access Token（脱敏显示） */
+  access_token_preview: string;
+  /** Token过期时间 */
+  expires_at?: string;
+  /** 选择原因 */
+  selection_reason: string;
+}
+
+/** 刷新凭证响应 */
+export interface RefreshCredentialResponse {
+  /** 凭证UUID */
+  uuid: string;
+  /** 刷新是否成功 */
+  success: boolean;
+  /** 新的过期时间 */
+  new_expires_at?: string;
+  /** 刷新结果信息 */
+  message: string;
+  /** 错误信息（如果有） */
+  error?: string;
+}
+
+/** Kiro 凭证池管理 API */
+export const kiroCredentialApi = {
+  /** 获取可用凭证列表 */
+  async getAvailableCredentials(): Promise<AvailableCredentialsResponse> {
+    const response = await fetch("/api/kiro/credentials/available");
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  /** 智能选择凭证 */
+  async selectCredential(
+    request: SelectCredentialRequest,
+  ): Promise<SelectCredentialResponse> {
+    const response = await fetch("/api/kiro/credentials/select", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+      );
+    }
+    return response.json();
+  },
+
+  /** 手动刷新指定凭证 */
+  async refreshCredential(uuid: string): Promise<RefreshCredentialResponse> {
+    const response = await fetch(`/api/kiro/credentials/${uuid}/refresh`, {
+      method: "PUT",
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+      );
+    }
+    return response.json();
+  },
+
+  /** 获取凭证详细状态 */
+  async getCredentialStatus(uuid: string): Promise<Record<string, any>> {
+    const response = await fetch(`/api/kiro/credentials/${uuid}/status`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+      );
+    }
+    return response.json();
+  },
+};
+
 // ============ Playwright 指纹浏览器登录 ============
 
 /**

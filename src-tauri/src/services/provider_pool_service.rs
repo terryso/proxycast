@@ -166,7 +166,13 @@ impl ProviderPoolService {
         ProviderPoolDao::delete(&conn, uuid).map_err(|e| e.to_string())
     }
 
-    /// 选择一个可用的凭证（轮询负载均衡）
+    /// 选择一个可用的凭证（智能轮换策略）
+    ///
+    /// 增强版轮换策略，考虑以下因素：
+    /// - 健康状态：优先选择健康的凭证
+    /// - 使用频率：优先选择使用次数较少的凭证
+    /// - 错误率：避免选择错误次数过多的凭证
+    /// - 冷却时间：避免短时间内重复使用同一凭证
     pub fn select_credential(
         &self,
         db: &DbConnection,
@@ -193,33 +199,93 @@ impl ProviderPoolService {
             return Ok(None);
         }
 
-        // 轮询选择
-        let index_key = match model {
-            Some(m) => format!("{}:{}", provider_type, m),
-            None => provider_type.to_string(),
-        };
-
-        let index = {
-            let indices = self.round_robin_index.read().unwrap();
-            indices
-                .get(&index_key)
-                .map(|i| i.load(Ordering::SeqCst))
-                .unwrap_or(0)
-        };
-
-        let selected_index = index % available.len();
-        let selected = available.remove(selected_index);
-
-        // 更新轮询索引
-        {
-            let mut indices = self.round_robin_index.write().unwrap();
-            let counter = indices
-                .entry(index_key)
-                .or_insert_with(|| AtomicUsize::new(0));
-            counter.store((index + 1) % usize::MAX, Ordering::SeqCst);
+        // 如果只有一个可用凭证，直接返回
+        if available.len() == 1 {
+            return Ok(Some(available.into_iter().next().unwrap()));
         }
 
+        // 智能选择：基于权重分数选择最优凭证
+        let selected = self.select_best_credential_by_weight(&available);
+
         Ok(Some(selected))
+    }
+
+    /// 基于权重分数选择最优凭证
+    fn select_best_credential_by_weight(
+        &self,
+        credentials: &[ProviderCredential],
+    ) -> ProviderCredential {
+        let now = chrono::Utc::now();
+
+        let mut best_score = f64::MIN;
+        let mut best_credential = None;
+
+        for cred in credentials {
+            let score = self.calculate_credential_score(cred, now, credentials);
+            if score > best_score {
+                best_score = score;
+                best_credential = Some(cred);
+            }
+        }
+
+        best_credential.unwrap().clone()
+    }
+
+    /// 计算凭证的综合分数（分数越高越优先）
+    fn calculate_credential_score(
+        &self,
+        cred: &ProviderCredential,
+        now: chrono::DateTime<chrono::Utc>,
+        all_credentials: &[ProviderCredential],
+    ) -> f64 {
+        let mut score = 0.0;
+
+        // 1. 健康状态权重 (40分)
+        if cred.is_healthy {
+            score += 40.0;
+        } else {
+            score -= 20.0; // 不健康的凭证严重扣分
+        }
+
+        // 2. 使用频率权重 (30分) - 使用次数越少分数越高
+        let max_usage = all_credentials
+            .iter()
+            .map(|c| c.usage_count)
+            .max()
+            .unwrap_or(1);
+        if max_usage > 0 {
+            let usage_ratio = cred.usage_count as f64 / max_usage as f64;
+            score += 30.0 * (1.0 - usage_ratio); // 使用越少分数越高
+        } else {
+            score += 30.0; // 如果都没使用过，给满分
+        }
+
+        // 3. 错误率权重 (20分) - 错误越少分数越高
+        let total_requests = cred.usage_count + cred.error_count as u64;
+        if total_requests > 0 {
+            let error_ratio = cred.error_count as f64 / total_requests as f64;
+            score += 20.0 * (1.0 - error_ratio); // 错误率越低分数越高
+        } else {
+            score += 20.0; // 没有历史记录给满分
+        }
+
+        // 4. 冷却时间权重 (10分) - 距离上次使用时间越长分数越高
+        if let Some(last_used) = &cred.last_used {
+            let duration_since_last_use = now.signed_duration_since(*last_used);
+            let minutes_since_last_use = duration_since_last_use.num_minutes() as f64;
+
+            // 超过5分钟的冷却时间给满分，否则按比例给分
+            let cooldown_score = if minutes_since_last_use >= 5.0 {
+                10.0
+            } else {
+                10.0 * (minutes_since_last_use / 5.0)
+            };
+            score += cooldown_score;
+        } else {
+            score += 10.0; // 从未使用过给满分
+        }
+
+        score
     }
 
     /// 记录凭证使用

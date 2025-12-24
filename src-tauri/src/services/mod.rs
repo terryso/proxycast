@@ -1,4 +1,5 @@
 pub mod backup_service;
+pub mod kiro_event_service;
 pub mod live_sync;
 pub mod mcp_service;
 pub mod mcp_sync;

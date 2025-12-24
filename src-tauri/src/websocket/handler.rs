@@ -261,6 +261,20 @@ async fn handle_message(
                 "FlowEvent messages are server-to-client only",
             )))
         }
+        WsMessage::SubscribeKiroEvents => {
+            // TODO: 实现Kiro事件订阅
+            None
+        }
+        WsMessage::UnsubscribeKiroEvents => {
+            // TODO: 实现Kiro事件取消订阅
+            None
+        }
+        WsMessage::KiroCredentialEvent(_) => {
+            // Kiro事件是服务端到客户端的消息，客户端不应该发送
+            Some(WsMessage::Error(WsError::invalid_message(
+                "KiroCredentialEvent messages are server-to-client only",
+            )))
+        }
     }
 }
 

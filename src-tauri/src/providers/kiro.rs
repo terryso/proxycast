@@ -13,6 +13,7 @@ use std::path::PathBuf;
 /// 关键改进：每个凭证生成独立的 Machine ID，避免多账号共用同一指纹被检测
 /// 优先级：profileArn > clientId > 系统硬件 ID
 ///
+/// 防指纹固化：添加基于小时的时间变化因子，在保持稳定性的同时避免指纹完全固化
 /// 这样每个 OAuth 凭证都有自己独立的指纹，模拟不同设备登录
 pub fn generate_machine_id_from_credentials(
     profile_arn: Option<&str>,
@@ -30,8 +31,19 @@ pub fn generate_machine_id_from_credentials(
             get_raw_machine_id().unwrap_or_else(|| "KIRO_DEFAULT_MACHINE".to_string())
         });
 
+    // 添加时间变化因子 - 按小时变化，避免指纹固化
+    // 使用小时级别的时间戳，确保在同一小时内指纹稳定，但定期变化
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // 按小时分组，每小时指纹会轻微变化
+    let hour_slot = now / 3600;
+
     let mut hasher = Sha256::new();
     hasher.update(unique_key.as_bytes());
+    hasher.update(&hour_slot.to_le_bytes()); // 添加时间因子
     let result = hasher.finalize();
     format!("{:x}", result)
 }

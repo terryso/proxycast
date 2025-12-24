@@ -44,12 +44,28 @@ impl RouteMatch {
 pub struct ProviderRouter {
     /// 路由注册表
     registry: Arc<RwLock<RouteRegistry>>,
+    /// 默认 Provider 引用（从配置动态获取）
+    default_provider_ref: Arc<RwLock<String>>,
 }
 
 impl ProviderRouter {
     /// 创建新的路由器
     pub fn new(registry: Arc<RwLock<RouteRegistry>>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            default_provider_ref: Arc::new(RwLock::new("kiro".to_string())),
+        }
+    }
+
+    /// 创建带有默认 Provider 引用的路由器
+    pub fn with_default_provider(
+        registry: Arc<RwLock<RouteRegistry>>,
+        default_provider_ref: Arc<RwLock<String>>,
+    ) -> Self {
+        Self {
+            registry,
+            default_provider_ref,
+        }
     }
 
     /// 解析请求路径
@@ -67,12 +83,13 @@ impl ProviderRouter {
             // /v1/messages
             ["v1", "messages"] => {
                 let registry = self.registry.read().await;
+                let default_provider = self.default_provider_ref.read().await.clone();
                 let route = registry
                     .enabled_routes()
                     .into_iter()
                     .find(|r| r.route_type == RouteType::Default)
                     .cloned()
-                    .unwrap_or_else(|| RegisteredRoute::default_route("kiro"));
+                    .unwrap_or_else(|| RegisteredRoute::default_route(&default_provider));
 
                 Some(RouteMatch {
                     route,
@@ -84,12 +101,13 @@ impl ProviderRouter {
             // /v1/chat/completions
             ["v1", "chat", "completions"] => {
                 let registry = self.registry.read().await;
+                let default_provider = self.default_provider_ref.read().await.clone();
                 let route = registry
                     .enabled_routes()
                     .into_iter()
                     .find(|r| r.route_type == RouteType::Default)
                     .cloned()
-                    .unwrap_or_else(|| RegisteredRoute::default_route("kiro"));
+                    .unwrap_or_else(|| RegisteredRoute::default_route(&default_provider));
 
                 Some(RouteMatch {
                     route,

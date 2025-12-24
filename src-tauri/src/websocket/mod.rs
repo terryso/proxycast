@@ -19,8 +19,9 @@ pub use lifecycle::{
 pub use processor::MessageProcessor;
 pub use stream::{BackpressureController, StreamForwarder};
 pub use types::{
-    WsApiRequest, WsApiResponse, WsConfig, WsConnection, WsConnectionStatus, WsEndpoint, WsError,
-    WsErrorCode, WsFlowEvent, WsMessage, WsStats, WsStatsSnapshot, WsStreamChunk, WsStreamEnd,
+    KiroTokenInfo, WsApiRequest, WsApiResponse, WsConfig, WsConnection, WsConnectionStatus,
+    WsEndpoint, WsError, WsErrorCode, WsFlowEvent, WsKiroEvent, WsMessage, WsStats,
+    WsStatsSnapshot, WsStreamChunk, WsStreamEnd,
 };
 
 use dashmap::DashMap;

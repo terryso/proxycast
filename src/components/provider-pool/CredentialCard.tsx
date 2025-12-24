@@ -29,6 +29,7 @@ import type {
 import {
   getKiroCredentialFingerprint,
   type KiroFingerprintInfo,
+  kiroCredentialApi,
 } from "@/lib/api/providerPool";
 import { usageApi, type UsageInfo } from "@/lib/api/usage";
 import { UsageDisplay } from "./UsageDisplay";
@@ -73,6 +74,12 @@ export function CredentialCard({
   const [fingerprintLoading, setFingerprintLoading] = useState(false);
   const [fingerprintExpanded, setFingerprintExpanded] = useState(false);
   const [fingerprintCopied, setFingerprintCopied] = useState(false);
+
+  // Kiro 增强状态管理
+  const [kiroHealthScore, setKiroHealthScore] = useState<number | null>(null);
+  const [kiroStatusLoading, setKiroStatusLoading] = useState(false);
+  const [kiroRefreshing, setKiroRefreshing] = useState(false);
+  const [kiroStatusExpanded, setKiroStatusExpanded] = useState(false);
 
   // 查询指纹信息
   const handleCheckFingerprint = async () => {
@@ -126,6 +133,51 @@ export function CredentialCard({
       setUsageError(e instanceof Error ? e.message : String(e));
     } finally {
       setUsageLoading(false);
+    }
+  };
+
+  // 获取 Kiro 详细状态
+  const handleCheckKiroStatus = async () => {
+    if (kiroStatusExpanded) {
+      setKiroStatusExpanded(false);
+      return;
+    }
+
+    setKiroStatusExpanded(true);
+    setKiroStatusLoading(true);
+
+    try {
+      const status = await kiroCredentialApi.getCredentialStatus(
+        credential.uuid,
+      );
+      setKiroHealthScore(status.health_score || 0);
+    } catch (e) {
+      console.error("获取 Kiro 状态失败:", e);
+    } finally {
+      setKiroStatusLoading(false);
+    }
+  };
+
+  // 快速刷新 Kiro Token
+  const handleQuickRefresh = async () => {
+    setKiroRefreshing(true);
+
+    try {
+      const result = await kiroCredentialApi.refreshCredential(credential.uuid);
+      if (result.success) {
+        // 刷新成功，可以显示成功消息
+        console.log("Token 刷新成功:", result.message);
+        // 可以触发页面数据刷新
+        if (onRefreshToken) {
+          onRefreshToken();
+        }
+      } else {
+        console.error("Token 刷新失败:", result.error || result.message);
+      }
+    } catch (e) {
+      console.error("Token 刷新异常:", e);
+    } finally {
+      setKiroRefreshing(false);
     }
   };
 
@@ -334,6 +386,42 @@ export function CredentialCard({
             </button>
           )}
 
+          {/* Kiro 详细状态按钮 - 仅 Kiro 凭证显示 */}
+          {isKiroCredential && (
+            <button
+              onClick={handleCheckKiroStatus}
+              disabled={kiroStatusLoading}
+              className={`rounded-lg p-2.5 transition-colors ${
+                kiroStatusExpanded
+                  ? "bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-200"
+                  : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400"
+              } disabled:opacity-50`}
+              title="查看详细状态和健康分数"
+            >
+              <Activity
+                className={`h-4 w-4 ${kiroStatusLoading ? "animate-pulse" : ""}`}
+              />
+            </button>
+          )}
+
+          {/* Kiro 快速刷新按钮 - 仅 Kiro 凭证显示 */}
+          {isKiroCredential && (
+            <button
+              onClick={handleQuickRefresh}
+              disabled={kiroRefreshing}
+              className={`rounded-lg p-2.5 transition-colors ${
+                kiroRefreshing
+                  ? "bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200"
+                  : "bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400"
+              } disabled:opacity-50`}
+              title="快速刷新 Token"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${kiroRefreshing ? "animate-spin" : ""}`}
+              />
+            </button>
+          )}
+
           <button
             onClick={onReset}
             className="rounded-lg bg-orange-100 p-2.5 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 transition-colors"
@@ -430,8 +518,42 @@ export function CredentialCard({
             <div /> /* 占位 */
           )}
 
-          {/* 健康检查 */}
-          {credential.last_health_check_time ? (
+          {/* 健康检查/健康分数 */}
+          {isKiroCredential && kiroHealthScore !== null ? (
+            // 为 Kiro 凭证显示健康分数
+            <div className="flex items-center gap-3">
+              <div
+                className={`h-5 w-5 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                  kiroHealthScore >= 80
+                    ? "bg-green-500"
+                    : kiroHealthScore >= 60
+                      ? "bg-yellow-500"
+                      : kiroHealthScore >= 40
+                        ? "bg-orange-500"
+                        : "bg-red-500"
+                }`}
+              >
+                ★
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">健康分数</div>
+                <div
+                  className={`font-bold text-xl tabular-nums ${
+                    kiroHealthScore >= 80
+                      ? "text-green-600 dark:text-green-400"
+                      : kiroHealthScore >= 60
+                        ? "text-yellow-600 dark:text-yellow-400"
+                        : kiroHealthScore >= 40
+                          ? "text-orange-600 dark:text-orange-400"
+                          : "text-red-600 dark:text-red-400"
+                  }`}
+                >
+                  {Math.round(kiroHealthScore)}
+                </div>
+              </div>
+            </div>
+          ) : credential.last_health_check_time ? (
+            // 为其他凭证显示健康检查时间
             <div className="flex items-center gap-3">
               <Activity className="h-5 w-5 text-emerald-500 shrink-0" />
               <div>
@@ -559,6 +681,155 @@ export function CredentialCard({
           ) : (
             <div className="text-sm text-muted-foreground">
               无法获取指纹信息
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Kiro 详细状态面板 - 仅 Kiro 凭证 */}
+      {isKiroCredential && kiroStatusExpanded && (
+        <div className="mx-4 mb-4 p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Kiro 详细状态
+            </span>
+            <button
+              onClick={() => setKiroStatusExpanded(false)}
+              className="text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </button>
+          </div>
+
+          {kiroStatusLoading ? (
+            <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+              <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+              加载中...
+            </div>
+          ) : kiroHealthScore !== null ? (
+            <div className="space-y-4">
+              {/* 健康分数详情 */}
+              <div className="bg-white dark:bg-emerald-950/50 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                    健康分数
+                  </span>
+                  <div
+                    className={`px-3 py-1 rounded-full text-sm font-bold ${
+                      kiroHealthScore >= 80
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                        : kiroHealthScore >= 60
+                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                          : kiroHealthScore >= 40
+                            ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                            : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                    }`}
+                  >
+                    {Math.round(kiroHealthScore)} / 100
+                  </div>
+                </div>
+
+                {/* 健康分数条 */}
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      kiroHealthScore >= 80
+                        ? "bg-green-500"
+                        : kiroHealthScore >= 60
+                          ? "bg-yellow-500"
+                          : kiroHealthScore >= 40
+                            ? "bg-orange-500"
+                            : "bg-red-500"
+                    }`}
+                    style={{
+                      width: `${Math.max(0, Math.min(100, kiroHealthScore))}%`,
+                    }}
+                  ></div>
+                </div>
+
+                {/* 健康状态描述 */}
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {credential.is_disabled
+                    ? "凭证已被自动禁用，需手动重新启用"
+                    : kiroHealthScore >= 80
+                      ? "凭证状态良好，可正常使用"
+                      : kiroHealthScore >= 60
+                        ? "凭证状态一般，建议注意监控"
+                        : kiroHealthScore >= 40
+                          ? "凭证状态较差，可能有风险"
+                          : "凭证状态异常，需要立即处理"}
+                </div>
+              </div>
+
+              {/* 状态指标 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white dark:bg-emerald-950/50 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Timer className="h-4 w-4 text-emerald-600" />
+                    <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                      冷却时间
+                    </span>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    根据使用频率计算的建议等待时间
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-emerald-950/50 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <BarChart3 className="h-4 w-4 text-emerald-600" />
+                    <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                      使用权重
+                    </span>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    在轮询池中的权重分配
+                  </div>
+                </div>
+              </div>
+
+              {/* 快速操作 */}
+              <div className="flex gap-2 pt-2 border-t border-emerald-200 dark:border-emerald-800">
+                {credential.is_disabled ? (
+                  // 已禁用凭证显示重新启用按钮
+                  <button
+                    onClick={onToggle}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors text-sm"
+                  >
+                    <Power className="h-4 w-4" />
+                    重新启用
+                  </button>
+                ) : (
+                  // 正常凭证显示刷新和检查按钮
+                  <>
+                    <button
+                      onClick={handleQuickRefresh}
+                      disabled={kiroRefreshing}
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 ${kiroRefreshing ? "animate-spin" : ""}`}
+                      />
+                      {kiroRefreshing ? "刷新中..." : "立即刷新"}
+                    </button>
+                    <button
+                      onClick={onCheckHealth}
+                      disabled={checkingHealth}
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                    >
+                      <Activity
+                        className={`h-4 w-4 ${checkingHealth ? "animate-pulse" : ""}`}
+                      />
+                      {checkingHealth ? "检查中..." : "重新检查"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              无法获取状态信息，请重试
             </div>
           )}
         </div>

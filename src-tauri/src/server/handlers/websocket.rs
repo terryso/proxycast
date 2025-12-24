@@ -349,6 +349,32 @@ async fn handle_ws_message(
             "Invalid message type from client",
         ))),
         WsProtoMessage::Error(_) => None,
+        WsProtoMessage::SubscribeKiroEvents => {
+            // TODO: 实现Kiro事件订阅
+            Some(WsProtoMessage::Response(WsApiResponse {
+                request_id: "subscribe_kiro_events".to_string(),
+                payload: serde_json::json!({
+                    "status": "subscribed",
+                    "message": "Successfully subscribed to kiro events"
+                }),
+            }))
+        }
+        WsProtoMessage::UnsubscribeKiroEvents => {
+            // TODO: 实现Kiro事件取消订阅
+            Some(WsProtoMessage::Response(WsApiResponse {
+                request_id: "unsubscribe_kiro_events".to_string(),
+                payload: serde_json::json!({
+                    "status": "unsubscribed",
+                    "message": "Successfully unsubscribed from kiro events"
+                }),
+            }))
+        }
+        WsProtoMessage::KiroCredentialEvent(_) => {
+            // Kiro事件是服务端到客户端的消息，客户端不应该发送
+            Some(WsProtoMessage::Error(WsError::invalid_message(
+                "KiroCredentialEvent messages are server-to-client only",
+            )))
+        }
     }
 }
 

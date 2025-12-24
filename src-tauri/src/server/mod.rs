@@ -28,6 +28,7 @@ use crate::server_utils::{
     build_anthropic_response, build_anthropic_stream_response, build_gemini_native_request, health,
     models, parse_cw_response,
 };
+use crate::services::kiro_event_service::KiroEventService;
 use crate::services::provider_pool_service::ProviderPoolService;
 use crate::services::token_cache_service::TokenCacheService;
 use crate::websocket::{WsConfig, WsConnectionManager, WsStats};
@@ -386,6 +387,8 @@ pub struct AppState {
     pub flow_interceptor: Arc<FlowInterceptor>,
     /// 端点 Provider 配置
     pub endpoint_providers: Arc<RwLock<EndpointProvidersConfig>>,
+    /// Kiro 事件服务
+    pub kiro_event_service: Arc<KiroEventService>,
 }
 
 /// 启动配置文件监控
@@ -734,6 +737,9 @@ async fn run_server(
             .unwrap_or_default(),
     ));
 
+    // 创建 Kiro 事件服务
+    let kiro_event_service = Arc::new(KiroEventService::new());
+
     let state = AppState {
         api_key: api_key.to_string(),
         base_url,
@@ -757,6 +763,7 @@ async fn run_server(
         flow_monitor,
         flow_interceptor,
         endpoint_providers,
+        kiro_event_service,
     };
 
     // 启动配置文件监控
@@ -805,6 +812,25 @@ async fn run_server(
             management_config,
         ));
 
+    // Kiro凭证管理API路由
+    let kiro_api_routes = Router::new()
+        .route(
+            "/api/kiro/credentials/available",
+            get(handlers::get_available_credentials),
+        )
+        .route(
+            "/api/kiro/credentials/select",
+            post(handlers::select_credential),
+        )
+        .route(
+            "/api/kiro/credentials/:uuid/refresh",
+            axum::routing::put(handlers::refresh_credential),
+        )
+        .route(
+            "/api/kiro/credentials/:uuid/status",
+            get(handlers::get_credential_status),
+        );
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/models", get(models))
@@ -843,6 +869,8 @@ async fn run_server(
         )
         // 管理 API 路由
         .merge(management_routes)
+        // Kiro凭证管理API路由
+        .merge(kiro_api_routes)
         .layer(DefaultBodyLimit::max(body_limit))
         .with_state(state);
 
@@ -1123,10 +1151,13 @@ async fn list_routes(State(state): State<AppState>) -> impl IntoResponse {
         None => Vec::new(),
     };
 
+    // 获取默认 Provider
+    let default_provider = state.default_provider.read().await.clone();
+
     // 添加默认路由
     let mut all_routes = vec![RouteInfo {
         selector: "default".to_string(),
-        provider_type: "kiro".to_string(),
+        provider_type: default_provider.clone(),
         credential_count: 1,
         endpoints: vec![
             crate::models::route_model::RouteEndpoint {
@@ -1147,7 +1178,7 @@ async fn list_routes(State(state): State<AppState>) -> impl IntoResponse {
 
     let response = RouteListResponse {
         base_url: state.base_url.clone(),
-        default_provider: "kiro".to_string(),
+        default_provider,
         routes: all_routes,
     };
 
