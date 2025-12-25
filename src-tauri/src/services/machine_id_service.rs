@@ -228,8 +228,8 @@ impl MachineIdService {
     #[cfg(not(target_os = "windows"))]
     async fn get_windows_machine_id(
         &self,
-        requires_admin: bool,
-        backup_exists: bool,
+        _requires_admin: bool,
+        _backup_exists: bool,
     ) -> Result<MachineIdInfo, String> {
         Err("Windows machine ID not supported on this platform".to_string())
     }
@@ -515,8 +515,8 @@ impl MachineIdService {
     #[cfg(not(target_os = "linux"))]
     async fn get_linux_machine_id(
         &self,
-        requires_admin: bool,
-        backup_exists: bool,
+        _requires_admin: bool,
+        _backup_exists: bool,
     ) -> Result<MachineIdInfo, String> {
         Err("Linux machine ID not supported on this platform".to_string())
     }
