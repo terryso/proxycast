@@ -699,29 +699,62 @@ pub async fn call_provider_openai(
     let _start_time = std::time::Instant::now();
     match &credential.credential {
         CredentialData::KiroOAuth { creds_file_path } => {
+            // 优先使用 token cache，避免每次都刷新 token
+            let db = match &state.db {
+                Some(db) => db,
+                None => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": {"message": "Database not available"}})),
+                    )
+                        .into_response();
+                }
+            };
+
+            // 获取缓存的 token（自动处理过期和刷新）
+            let token = match state
+                .token_cache
+                .get_valid_token(db, &credential.uuid)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!("[POOL] Token cache miss, loading from source: {}", e);
+                    // 降级：从源文件加载并刷新
+                    let mut kiro = KiroProvider::new();
+                    if let Err(e) = kiro.load_credentials_from_path(creds_file_path).await {
+                        let _ = state.pool_service.mark_unhealthy(
+                            db,
+                            &credential.uuid,
+                            Some(&format!("Failed to load credentials: {}", e)),
+                        );
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({"error": {"message": format!("Failed to load Kiro credentials: {}", e)}})),
+                        )
+                            .into_response();
+                    }
+                    if let Err(e) = kiro.refresh_token().await {
+                        let _ = state.pool_service.mark_unhealthy(
+                            db,
+                            &credential.uuid,
+                            Some(&format!("Token refresh failed: {}", e)),
+                        );
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            Json(serde_json::json!({"error": {"message": format!("Token refresh failed: {}", e)}})),
+                        )
+                            .into_response();
+                    }
+                    kiro.credentials.access_token.unwrap_or_default()
+                }
+            };
+
+            // 使用获取到的 token 创建 KiroProvider
             let mut kiro = KiroProvider::new();
-            if let Err(e) = kiro.load_credentials_from_path(creds_file_path).await {
-                // 记录凭证加载失败
-                if let Some(db) = &state.db {
-                    let _ = state.pool_service.mark_unhealthy(db, &credential.uuid, Some(&e.to_string()));
-                }
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": {"message": format!("Failed to load Kiro credentials: {}", e)}})),
-                )
-                    .into_response();
-            }
-            if let Err(e) = kiro.refresh_token().await {
-                // 记录 Token 刷新失败
-                if let Some(db) = &state.db {
-                    let _ = state.pool_service.mark_unhealthy(db, &credential.uuid, Some(&format!("Token refresh failed: {}", e)));
-                }
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({"error": {"message": format!("Token refresh failed: {}", e)}})),
-                )
-                    .into_response();
-            }
+            kiro.credentials.access_token = Some(token);
+            // 从源文件加载其他配置（region, profile_arn 等）
+            let _ = kiro.load_credentials_from_path(creds_file_path).await;
             match kiro.call_api(request).await {
                 Ok(resp) => {
                     let status = resp.status();
