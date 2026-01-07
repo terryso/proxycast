@@ -20,72 +20,129 @@ function getReactFiberInfo(element: HTMLElement): Partial<ComponentInfo> | null 
   let fiber = (element as any)[fiberKey];
   if (!fiber) return null;
 
+  // 收集组件链信息
+  const componentChain: string[] = [];
+  let targetFiber = null;
   let depth = 0;
+
+  // 遍历 Fiber 树找到最近的用户组件
   while (fiber) {
     const type = fiber.type;
     if (type && typeof type === "function") {
       const name = type.displayName || type.name || "Anonymous";
-      if (!name.startsWith("_") && name !== "Anonymous") {
-        // 尝试多种方式获取文件路径
-        let filePath = "";
-        
-        // 方式1: _debugSource (开发模式)
-        if (fiber._debugSource) {
-          const source = fiber._debugSource;
-          filePath = source.fileName || "";
-          if (source.lineNumber) {
-            filePath += `:${source.lineNumber}`;
-          }
+      // 过滤掉内部组件和匿名组件
+      if (!name.startsWith("_") && name !== "Anonymous" && !name.includes("Provider") && !name.includes("Consumer")) {
+        if (!targetFiber) {
+          targetFiber = fiber;
         }
-        // 方式2: type._source
-        else if (type._source) {
-          const source = type._source;
-          filePath = source.fileName || "";
-          if (source.lineNumber) {
-            filePath += `:${source.lineNumber}`;
-          }
-        }
-        // 方式3: 尝试从函数的 toString 中提取（某些打包器会保留）
-        else if (type.toString) {
-          const funcStr = type.toString();
-          // 检查是否有 sourceURL 注释
-          const sourceMatch = funcStr.match(/\/\/# sourceURL=(.+)/);
-          if (sourceMatch) {
-            filePath = sourceMatch[1];
-          }
-        }
-
-        // 如果还是没有路径，显示提示信息
-        if (!filePath) {
-          filePath = "仅开发模式可用 (需要 React DevTools)";
-        }
-
-        const props = fiber.memoizedProps || {};
-        const safeProps: Record<string, unknown> = {};
-        for (const key of Object.keys(props)) {
-          const value = props[key];
-          if (typeof value === "function") {
-            safeProps[key] = "[Function]";
-          } else if (typeof value === "object" && value !== null) {
-            if (Array.isArray(value)) {
-              safeProps[key] = `[Array(${value.length})]`;
-            } else if (value.$$typeof) {
-              safeProps[key] = "[ReactElement]";
-            } else {
-              safeProps[key] = "[Object]";
-            }
-          } else {
-            safeProps[key] = value;
-          }
-        }
-
-        return { name, filePath, props: safeProps, depth };
+        componentChain.push(name);
+        if (componentChain.length >= 3) break; // 只收集前3个
       }
     }
     fiber = fiber.return;
     depth++;
   }
-  return null;
+
+  if (!targetFiber) {
+    // 如果没找到用户组件，使用第一个函数组件
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fiber = (element as any)[fiberKey];
+    depth = 0;
+    while (fiber) {
+      const type = fiber.type;
+      if (type && typeof type === "function") {
+        const name = type.displayName || type.name;
+        if (name && name !== "Anonymous") {
+          targetFiber = fiber;
+          break;
+        }
+      }
+      fiber = fiber.return;
+      depth++;
+    }
+  }
+
+  if (!targetFiber) return null;
+
+  const type = targetFiber.type;
+  const name = type.displayName || type.name || "Unknown";
+
+  // 尝试多种方式获取文件路径
+  let filePath = "";
+
+  // 方式1: _debugSource (开发模式 - React 17+)
+  if (targetFiber._debugSource) {
+    const source = targetFiber._debugSource;
+    filePath = source.fileName || "";
+    if (source.lineNumber) {
+      filePath += `:${source.lineNumber}`;
+      if (source.columnNumber) {
+        filePath += `:${source.columnNumber}`;
+      }
+    }
+  }
+  // 方式2: __source prop (某些配置下)
+  else if (targetFiber.memoizedProps?.__source) {
+    const source = targetFiber.memoizedProps.__source;
+    filePath = source.fileName || "";
+    if (source.lineNumber) {
+      filePath += `:${source.lineNumber}`;
+    }
+  }
+  // 方式3: _debugOwner 的 _debugSource
+  else if (targetFiber._debugOwner?._debugSource) {
+    const source = targetFiber._debugOwner._debugSource;
+    filePath = source.fileName || "";
+    if (source.lineNumber) {
+      filePath += `:${source.lineNumber}`;
+    }
+  }
+
+  // 简化路径显示
+  if (filePath) {
+    // 移除绝对路径前缀，只保留 src/ 开始的部分
+    const srcIndex = filePath.indexOf("/src/");
+    if (srcIndex !== -1) {
+      filePath = filePath.substring(srcIndex + 1);
+    }
+    // Windows 路径
+    const srcIndexWin = filePath.indexOf("\\src\\");
+    if (srcIndexWin !== -1) {
+      filePath = filePath.substring(srcIndexWin + 1).replace(/\\/g, "/");
+    }
+  }
+
+  if (!filePath) {
+    filePath = "生产构建中不可用";
+  }
+
+  // 获取 props
+  const props = targetFiber.memoizedProps || {};
+  const safeProps: Record<string, unknown> = {};
+  for (const key of Object.keys(props)) {
+    if (key.startsWith("_") || key === "__source" || key === "__self") continue;
+    const value = props[key];
+    if (typeof value === "function") {
+      safeProps[key] = "[Function]";
+    } else if (typeof value === "object" && value !== null) {
+      if (Array.isArray(value)) {
+        safeProps[key] = `[Array(${value.length})]`;
+      } else if (value.$$typeof) {
+        safeProps[key] = "[ReactElement]";
+      } else {
+        safeProps[key] = "[Object]";
+      }
+    } else {
+      safeProps[key] = value;
+    }
+  }
+
+  return {
+    name,
+    filePath,
+    props: safeProps,
+    depth,
+  };
 }
 
 /** 组件信息弹窗 */
