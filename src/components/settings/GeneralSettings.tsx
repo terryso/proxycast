@@ -3,12 +3,21 @@
  * @description 通用设置页面 - 主题、代理、启动行为配置
  */
 import { useState, useEffect, useCallback } from "react";
-import { Moon, Sun, Monitor, RefreshCw, Info, RotateCcw } from "lucide-react";
+import {
+  Moon,
+  Sun,
+  Monitor,
+  RefreshCw,
+  Info,
+  RotateCcw,
+  Volume2,
+} from "lucide-react";
 import { cn, validateProxyUrl } from "@/lib/utils";
 import { getConfig, saveConfig, Config } from "@/hooks/useTauri";
 import { useOnboardingState } from "@/components/onboarding";
 import { LanguageSelector, Language } from "./LanguageSelector";
 import { useI18nPatch } from "@/i18n/I18nPatchProvider";
+import { useSoundContext } from "@/contexts/useSoundContext";
 
 type Theme = "light" | "dark" | "system";
 
@@ -19,6 +28,8 @@ export function GeneralSettings() {
   const [language, setLanguageState] = useState<Language>("zh");
   const { resetOnboarding } = useOnboardingState();
   const { setLanguage: setI18nLanguage } = useI18nPatch();
+  const { soundEnabled, setSoundEnabled, playToolcallSound } =
+    useSoundContext();
 
   // 重新运行引导
   const handleResetOnboarding = useCallback(() => {
@@ -213,6 +224,32 @@ export function GeneralSettings() {
           <LanguageSelector
             currentLanguage={language}
             onLanguageChange={handleLanguageChange}
+          />
+        </div>
+      </div>
+
+      {/* 音效 */}
+      <div className="rounded-lg border p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Volume2 className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <h3 className="text-sm font-medium">音效</h3>
+              <p className="text-xs text-muted-foreground">
+                工具调用和打字时播放提示音
+              </p>
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={soundEnabled}
+            onChange={(e) => {
+              setSoundEnabled(e.target.checked);
+              if (e.target.checked) {
+                playToolcallSound();
+              }
+            }}
+            className="w-4 h-4 rounded border-gray-300"
           />
         </div>
       </div>

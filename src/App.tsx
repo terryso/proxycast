@@ -33,6 +33,7 @@ import { showRegistryLoadError } from "./lib/utils/connectError";
 import { useDeepLink } from "./hooks/useDeepLink";
 import { useRelayRegistry } from "./hooks/useRelayRegistry";
 import { ComponentDebugProvider } from "./contexts/ComponentDebugContext";
+import { SoundProvider } from "./contexts/SoundProvider";
 import { ComponentDebugOverlay } from "./components/dev";
 import { Page } from "./types/page";
 
@@ -252,28 +253,30 @@ function AppContent() {
 
   // 4. 正常主界面
   return (
-    <ComponentDebugProvider>
-      <AppContainer>
-        <AppSidebar currentPage={currentPage} onNavigate={setCurrentPage} />
-        <MainContent>{renderAllPages()}</MainContent>
-        {/* ProxyCast Connect 确认弹窗 */}
-        {/* _Requirements: 5.2_ */}
-        <ConnectConfirmDialog
-          open={isDialogOpen}
-          relay={relayInfo}
-          relayId={connectPayload?.relay ?? ""}
-          apiKey={connectPayload?.key ?? ""}
-          keyName={connectPayload?.name}
-          isVerified={isVerified}
-          isSaving={isSaving}
-          error={error}
-          onConfirm={handleConfirm}
-          onCancel={handleCancel}
-        />
-        {/* 组件视图调试覆盖层 */}
-        <ComponentDebugOverlay />
-      </AppContainer>
-    </ComponentDebugProvider>
+    <SoundProvider>
+      <ComponentDebugProvider>
+        <AppContainer>
+          <AppSidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+          <MainContent>{renderAllPages()}</MainContent>
+          {/* ProxyCast Connect 确认弹窗 */}
+          {/* _Requirements: 5.2_ */}
+          <ConnectConfirmDialog
+            open={isDialogOpen}
+            relay={relayInfo}
+            relayId={connectPayload?.relay ?? ""}
+            apiKey={connectPayload?.key ?? ""}
+            keyName={connectPayload?.name}
+            isVerified={isVerified}
+            isSaving={isSaving}
+            error={error}
+            onConfirm={handleConfirm}
+            onCancel={handleCancel}
+          />
+          {/* 组件视图调试覆盖层 */}
+          <ComponentDebugOverlay />
+        </AppContainer>
+      </ComponentDebugProvider>
+    </SoundProvider>
   );
 }
 

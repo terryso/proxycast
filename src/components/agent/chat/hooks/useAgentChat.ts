@@ -32,6 +32,50 @@ export interface Topic {
   messagesCount: number;
 }
 
+// 音效播放器（模块级别单例）
+let toolcallAudio: HTMLAudioElement | null = null;
+let typewriterAudio: HTMLAudioElement | null = null;
+let lastTypewriterTime = 0;
+const TYPEWRITER_INTERVAL = 120;
+
+const initAudio = () => {
+  if (!toolcallAudio) {
+    toolcallAudio = new Audio("/sounds/tool-call.mp3");
+    toolcallAudio.volume = 1;
+    toolcallAudio.load();
+  }
+  if (!typewriterAudio) {
+    typewriterAudio = new Audio("/sounds/typing.mp3");
+    typewriterAudio.volume = 0.6;
+    typewriterAudio.load();
+  }
+};
+
+const getSoundEnabled = (): boolean => {
+  return localStorage.getItem("proxycast_sound_enabled") === "true";
+};
+
+const playToolcallSound = () => {
+  if (!getSoundEnabled()) return;
+  initAudio();
+  if (toolcallAudio) {
+    toolcallAudio.currentTime = 0;
+    toolcallAudio.play().catch(console.error);
+  }
+};
+
+const playTypewriterSound = () => {
+  if (!getSoundEnabled()) return;
+  const now = Date.now();
+  if (now - lastTypewriterTime < TYPEWRITER_INTERVAL) return;
+  initAudio();
+  if (typewriterAudio) {
+    typewriterAudio.currentTime = 0;
+    typewriterAudio.play().catch(console.error);
+    lastTypewriterTime = now;
+  }
+};
+
 // Helper for localStorage (Persistent across reloads)
 const loadPersisted = <T>(key: string, defaultValue: T): T => {
   try {
@@ -416,6 +460,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}) {
           case "text_delta":
             // 累积文本并实时更新 UI（同时更新 content 和 contentParts）
             accumulatedContent += data.text;
+
+            // 播放打字机音效
+            playTypewriterSound();
+
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === assistantMsgId
@@ -508,6 +556,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}) {
           case "tool_start": {
             // 工具开始执行 - 添加到工具调用列表和 contentParts
             console.log(`[Tool Start] ${data.tool_name} (${data.tool_id})`);
+
+            // 播放工具调用音效
+            playToolcallSound();
+
             const newToolCall = {
               id: data.tool_id,
               name: data.tool_name,
