@@ -1180,6 +1180,12 @@ pub fn run() {
             commands::update_cmd::update_last_check_timestamp,
             commands::update_cmd::close_update_window,
             commands::update_cmd::test_update_window,
+            // Music commands
+            commands::music_cmd::check_python_env,
+            commands::music_cmd::analyze_midi,
+            commands::music_cmd::convert_mp3_to_midi,
+            commands::music_cmd::load_music_resource,
+            commands::music_cmd::install_python_dependencies,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
