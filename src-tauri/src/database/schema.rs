@@ -219,6 +219,12 @@ pub fn create_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         [],
     );
 
+    // Migration: 添加支持的模型列表字段
+    let _ = conn.execute(
+        "ALTER TABLE provider_pool_credentials ADD COLUMN supported_models TEXT",
+        [],
+    );
+
     // Migration: 添加代理URL字段 - 使用重建表结构的方式
     migrate_add_proxy_url_column(conn)?;
 

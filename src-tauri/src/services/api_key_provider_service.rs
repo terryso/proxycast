@@ -1085,6 +1085,7 @@ impl ApiKeyProviderService {
             check_health: false,
             check_model_name: None,
             not_supported_models: Vec::new(),
+            supported_models: Vec::new(),
             usage_count: 0,
             error_count: 0,
             last_used: None,
@@ -1142,6 +1143,7 @@ impl ApiKeyProviderService {
             check_health: false, // 降级凭证不参与健康检查
             check_model_name: None,
             not_supported_models: Vec::new(),
+            supported_models: Vec::new(),
             usage_count: 0,
             error_count: 0,
             last_used: None,
